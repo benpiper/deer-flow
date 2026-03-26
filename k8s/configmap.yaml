@@ -1,0 +1,168 @@
+# ConfigMap for config.yaml and nginx.conf
+# NOTE: Update config.yaml contents to match your environment before deploying.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: deer-flow-config
+  namespace: deer-flow
+data:
+  config.yaml: |
+    config_version: 3
+
+    models:
+      - name: deepseek-v3.2
+        display_name: DeepSeek V3.2
+        use: deerflow.models.patched_deepseek:PatchedChatDeepSeek
+        model: deepseek-chat
+        api_key: $DEEPSEEK_API_KEY
+        max_tokens: 8192
+        supports_thinking: true
+        supports_vision: false
+      - name: gemini-3-flash-lite
+        display_name: Gemini 3 Flash Lite
+        use: langchain_google_genai:ChatGoogleGenerativeAI
+        model: gemini-3.1-flash-lite-preview
+        google_api_key: $GEMINI_API_KEY
+        max_tokens: 8192
+        supports_vision: true
+
+    tool_groups:
+      - name: web
+      - name: file:read
+      - name: file:write
+      - name: bash
+
+    tools:
+      - name: web_search
+        group: web
+        use: deerflow.community.tavily.tools:web_search_tool
+        max_results: 5
+      - name: web_fetch
+        group: web
+        use: deerflow.community.jina_ai.tools:web_fetch_tool
+        timeout: 10
+      - name: image_search
+        group: web
+        use: deerflow.community.image_search.tools:image_search_tool
+        max_results: 5
+      - name: read_file
+        group: file:read
+        use: deerflow.community.file_operations.tools:read_file_tool
+      - name: write_file
+        group: file:write
+        use: deerflow.community.file_operations.tools:write_file_tool
+      - name: bash
+        group: bash
+        use: deerflow.community.bash.tools:bash_tool
+
+    sandbox:
+      use: deerflow.sandbox.local:LocalSandboxProvider
+
+    memory:
+      enabled: true
+      storage_path: memory.json
+      injection_enabled: false
+      max_facts: 100
+
+  extensions_config.json: |
+    {}
+
+---
+# ConfigMap for nginx configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx-config
+  namespace: deer-flow
+data:
+  nginx.conf: |
+    events {
+        worker_connections 1024;
+    }
+    pid /tmp/nginx.pid;
+    http {
+        sendfile on;
+        tcp_nopush on;
+        tcp_nodelay on;
+        keepalive_timeout 65;
+        types_hash_max_size 2048;
+        access_log /dev/stdout;
+        error_log /dev/stderr;
+
+        # Use kube-dns for service resolution
+        resolver kube-dns.kube-system.svc.cluster.local valid=10s ipv6=off;
+
+        upstream gateway {
+            server gateway.deer-flow.svc.cluster.local:8001;
+        }
+        upstream langgraph {
+            server langgraph.deer-flow.svc.cluster.local:2024;
+        }
+        upstream frontend {
+            server frontend.deer-flow.svc.cluster.local:3000;
+        }
+
+        server {
+            listen 2026 default_server;
+            server_name _;
+
+            proxy_hide_header 'Access-Control-Allow-Origin';
+            proxy_hide_header 'Access-Control-Allow-Methods';
+            proxy_hide_header 'Access-Control-Allow-Headers';
+            proxy_hide_header 'Access-Control-Allow-Credentials';
+            add_header 'Access-Control-Allow-Origin' '*' always;
+            add_header 'Access-Control-Allow-Methods' 'GET, POST, PUT, DELETE, PATCH, OPTIONS' always;
+            add_header 'Access-Control-Allow-Headers' '*' always;
+
+            if ($request_method = 'OPTIONS') {
+                return 204;
+            }
+
+            # LangGraph API
+            location /api/langgraph/ {
+                rewrite ^/api/langgraph/(.*) /$1 break;
+                proxy_pass http://langgraph;
+                proxy_http_version 1.1;
+                proxy_set_header Host $host;
+                proxy_set_header X-Real-IP $remote_addr;
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto $scheme;
+                proxy_set_header Connection '';
+                proxy_buffering off;
+                proxy_cache off;
+                proxy_set_header X-Accel-Buffering no;
+                proxy_connect_timeout 600s;
+                proxy_send_timeout 600s;
+                proxy_read_timeout 600s;
+                chunked_transfer_encoding on;
+            }
+
+            # Gateway API routes
+            location /api/models    { proxy_pass http://gateway; proxy_http_version 1.1; proxy_set_header Host $host; }
+            location /api/memory    { proxy_pass http://gateway; proxy_http_version 1.1; proxy_set_header Host $host; }
+            location /api/mcp       { proxy_pass http://gateway; proxy_http_version 1.1; proxy_set_header Host $host; }
+            location /api/skills    { proxy_pass http://gateway; proxy_http_version 1.1; proxy_set_header Host $host; }
+            location /api/agents    { proxy_pass http://gateway; proxy_http_version 1.1; proxy_set_header Host $host; }
+            location ~ ^/api/threads { proxy_pass http://gateway; proxy_http_version 1.1; proxy_set_header Host $host; client_max_body_size 100M; }
+            location /docs          { proxy_pass http://gateway; proxy_http_version 1.1; proxy_set_header Host $host; }
+            location /redoc         { proxy_pass http://gateway; proxy_http_version 1.1; proxy_set_header Host $host; }
+            location /openapi.json  { proxy_pass http://gateway; proxy_http_version 1.1; proxy_set_header Host $host; }
+            location /health        { proxy_pass http://gateway; proxy_http_version 1.1; proxy_set_header Host $host; }
+
+            # Frontend (catch-all)
+            location / {
+                proxy_pass http://frontend;
+                proxy_http_version 1.1;
+                proxy_set_header Host $host;
+                proxy_set_header X-Real-IP $remote_addr;
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto $scheme;
+                proxy_set_header Upgrade $http_upgrade;
+                proxy_set_header Connection 'upgrade';
+                proxy_cache_bypass $http_upgrade;
+                proxy_connect_timeout 600s;
+                proxy_send_timeout 600s;
+                proxy_read_timeout 600s;
+            }
+        }
+    }
