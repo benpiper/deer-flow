@@ -1,0 +1,69 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: langgraph
+  namespace: deer-flow
+  labels:
+    app: deer-flow
+    component: langgraph
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      component: langgraph
+  template:
+    metadata:
+      labels:
+        app: deer-flow
+        component: langgraph
+    spec:
+      containers:
+        - name: langgraph
+          image: deer-flow-langgraph:latest  # Build and push to your registry
+          imagePullPolicy: IfNotPresent
+          command: ["sh", "-c", "cd backend && uv run langgraph dev --host 0.0.0.0 --port 2024 --no-browser"]
+          ports:
+            - containerPort: 2024
+          envFrom:
+            - secretRef:
+                name: deer-flow-secrets
+          volumeMounts:
+            - name: config
+              mountPath: /app/config.yaml
+              subPath: config.yaml
+            - name: config
+              mountPath: /app/extensions_config.json
+              subPath: extensions_config.json
+            - name: data
+              mountPath: /app/backend/.deer-flow
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+          readinessProbe:
+            tcpSocket:
+              port: 2024
+            initialDelaySeconds: 20
+            periodSeconds: 10
+      volumes:
+        - name: config
+          configMap:
+            name: deer-flow-config
+        - name: data
+          persistentVolumeClaim:
+            claimName: deer-flow-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: langgraph
+  namespace: deer-flow
+spec:
+  selector:
+    component: langgraph
+  ports:
+    - port: 2024
+      targetPort: 2024

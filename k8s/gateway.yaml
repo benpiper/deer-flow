@@ -1,0 +1,83 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gateway
+  namespace: deer-flow
+  labels:
+    app: deer-flow
+    component: gateway
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      component: gateway
+  template:
+    metadata:
+      labels:
+        app: deer-flow
+        component: gateway
+    spec:
+      containers:
+        - name: gateway
+          image: deer-flow-gateway:latest  # Build and push to your registry
+          imagePullPolicy: IfNotPresent
+          command: ["sh", "-c", "cd backend && uv run uvicorn app.gateway.app:app --host 0.0.0.0 --port 8001"]
+          ports:
+            - containerPort: 8001
+          envFrom:
+            - secretRef:
+                name: deer-flow-secrets
+          volumeMounts:
+            - name: config
+              mountPath: /app/config.yaml
+              subPath: config.yaml
+            - name: config
+              mountPath: /app/extensions_config.json
+              subPath: extensions_config.json
+            - name: data
+              mountPath: /app/backend/.deer-flow
+          resources:
+            requests:
+              cpu: 200m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8001
+            initialDelaySeconds: 15
+            periodSeconds: 10
+      volumes:
+        - name: config
+          configMap:
+            name: deer-flow-config
+        - name: data
+          persistentVolumeClaim:
+            claimName: deer-flow-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gateway
+  namespace: deer-flow
+spec:
+  selector:
+    component: gateway
+  ports:
+    - port: 8001
+      targetPort: 8001
+---
+# Shared PVC for memory.json and other persistent data
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: deer-flow-data
+  namespace: deer-flow
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi

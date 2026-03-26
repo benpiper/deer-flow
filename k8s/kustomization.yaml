@@ -1,0 +1,15 @@
+# DeerFlow Kubernetes Deployment
+# Usage: kubectl apply -k k8s/
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: deer-flow
+
+resources:
+  - namespace.yaml
+  - secrets.yaml
+  - configmap.yaml
+  - frontend.yaml
+  - gateway.yaml
+  - langgraph.yaml
+  - ingress.yaml

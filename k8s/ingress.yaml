@@ -1,0 +1,85 @@
+# Nginx reverse proxy — handles all routing between services.
+# Alternative: Remove this and use a pure Ingress controller with path-based rules,
+# but nginx is needed for the /api/langgraph/ rewrite and SSE streaming config.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx
+  namespace: deer-flow
+  labels:
+    app: deer-flow
+    component: nginx
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      component: nginx
+  template:
+    metadata:
+      labels:
+        app: deer-flow
+        component: nginx
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:alpine
+          ports:
+            - containerPort: 2026
+          volumeMounts:
+            - name: nginx-config
+              mountPath: /etc/nginx/nginx.conf
+              subPath: nginx.conf
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+          readinessProbe:
+            tcpSocket:
+              port: 2026
+            initialDelaySeconds: 5
+            periodSeconds: 5
+      volumes:
+        - name: nginx-config
+          configMap:
+            name: nginx-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx
+  namespace: deer-flow
+spec:
+  type: LoadBalancer  # Change to NodePort or ClusterIP depending on your setup
+  selector:
+    component: nginx
+  ports:
+    - port: 2026
+      targetPort: 2026
+---
+# Optional: Ingress for domain-based access (if you have an ingress controller)
+# Uncomment and configure if you want to access via a hostname instead of LoadBalancer IP.
+# apiVersion: networking.k8s.io/v1
+# kind: Ingress
+# metadata:
+#   name: deer-flow
+#   namespace: deer-flow
+#   annotations:
+#     nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+#     nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
+#     nginx.ingress.kubernetes.io/proxy-body-size: "100m"
+# spec:
+#   ingressClassName: nginx
+#   rules:
+#     - host: deerflow.example.com
+#       http:
+#         paths:
+#           - path: /
+#             pathType: Prefix
+#             backend:
+#               service:
+#                 name: nginx
+#                 port:
+#                   number: 2026
