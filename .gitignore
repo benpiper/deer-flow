@@ -54,4 +54,3 @@ web/
 # Deployment artifacts
 backend/Dockerfile.langgraph
 config.yaml.bak
-logs/

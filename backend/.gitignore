@@ -26,11 +26,3 @@ config.yaml
 
 # Claude Code settings
 .claude/settings.local.json
-logs/
-.deer-flow/
-*.db
-*.db-journal
-.langgraph_api/
-.langgraph_ops.pckl
-logs/
-.deer-flow/
